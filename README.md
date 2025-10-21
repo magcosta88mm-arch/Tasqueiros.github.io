@@ -1,3 +1,4 @@
+[inscricoes_tasqueiros_v4.3_firestore.html](https://github.com/user-attachments/files/23027456/inscricoes_tasqueiros_v4.3_firestore.html)
 <!doctype html>
 <html lang="pt">
 <head>
@@ -5,6 +6,25 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Inscrições - Tasqueiros Sem Lei</title>
 
+<script type="module">
+  // Import the functions you need from the SDKs you need
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
+  // TODO: Add SDKs for Firebase products that you want to use
+  // https://firebase.google.com/docs/web/setup#available-libraries
+
+  // Your web app's Firebase configuration
+  const firebaseConfig = {
+    apiKey: "AIzaSyAbKbQF9p_3oSwJYJMTnDe0S72Ow2Cl5fg",
+    authDomain: "tasqueiros-1268f.firebaseapp.com",
+    projectId: "tasqueiros-1268f",
+    storageBucket: "tasqueiros-1268f.firebasestorage.app",
+    messagingSenderId: "1006368518375",
+    appId: "1:1006368518375:web:acac391525629d443b7242"
+  };
+
+  // Initialize Firebase
+  const app = initializeApp(firebaseConfig);
+</script>
 <style>
 :root{--bg:#0b0b0b;--card:#3b4b2b;--card-contrast:#27351f;--accent:#b9d09a;--text:#eee;--muted:#bdbdbd}
 html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
@@ -99,32 +119,30 @@ hr{border:none;border-top:1px solid rgba(0,0,0,0.25);margin:14px 0}
     <input id="novaSenha" type="password" placeholder="Nova senha" />
     <button onclick="guardarNovaSenha()">Guardar nova senha</button>
   </div>
-  <p class="muted small-note">Senha atual: <strong><span id="senhaAtualTxt">Super bock</span></strong></p>
-</section>
+  <p class="muted small-note">Senha atual: <strong><span id="senh<script type="module">
+// Firestore integration replacing localStorage persistence
+import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDocs } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
 
-<p class="small-note" style="text-align:center;margin-top:18px">Abrir este ficheiro num só dispositivo para administrar (configurações e inscrições são guardadas localmente).</p>
-
-</div></div>
-
-<script>
-// keys
+// keys (keep for settings local storage)
 const SETTINGS_KEY = 'inscricoes_settings_v4';
 const INSCRITOS_KEY = 'inscritos_tasqueiros_v4';
 
-// defaults
+// defaults (keep as original)
 const DEFAULT = { gameDate: 'Domingo - 20 de Outubro de 2025', limit: 30, password: 'Super bock' };
 
 function loadSettings() {
   try {
     const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-    return { gameDate: s.gameDate || DEFAULT.gameDate, limit: (typeof s.limit === 'number')? s.limit : DEFAULT.limit, password: s.password || DEFAULT.password };
-  } catch(e) { return Object.assign({}, DEFAULT); }
+    return { gameDate: s.gameDate || DEFAULT.gameDate, limit: (typeof s.limit === 'number') ? s.limit : DEFAULT.limit, password: s.password || DEFAULT.password };
+  } catch (e) {
+    return Object.assign({}, DEFAULT);
+  }
 }
 function saveSettings(s) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
 
 let settings = loadSettings();
-let inscritos = JSON.parse(localStorage.getItem(INSCRITOS_KEY) || '[]');
 
+// DOM refs (keep same IDs as original)
 const form = document.getElementById('inscricaoForm');
 const status = document.getElementById('status');
 const tbody = document.querySelector('#lista tbody');
@@ -132,129 +150,142 @@ const countEl = document.getElementById('count');
 const limitEl = document.getElementById('limit');
 const vagasRestEl = document.getElementById('vagasRestantes');
 
+// helper to escape HTML when injecting into table
+function escapeHtml(s){ if(!s) return ''; return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+
 function atualizarUI() {
-  document.getElementById('gameDate').textContent = 'Jogo: ' + settings.gameDate;
-  limitEl.textContent = settings.limit;
-  countEl.textContent = inscritos.length;
-  vagasRestEl.textContent = Math.max(0, settings.limit - inscritos.length);
-  document.getElementById('senhaAtualTxt').textContent = settings.password;
+  // update UI elements that show settings
+  const gd = document.getElementById('gameDate');
+  if (gd) gd.textContent = 'Jogo: ' + settings.gameDate;
+  if (limitEl) limitEl.textContent = settings.limit;
+  const senhaTxt = document.getElementById('senhaAtualTxt');
+  if (senhaTxt) senhaTxt.textContent = settings.password;
 }
 
-function atualizarTabela() {
+// Render tabela com lista fornecida
+function atualizarTabela(lista) {
   tbody.innerHTML = '';
-  inscritos.forEach((p, i) => {
+  lista.forEach((p, i) => {
     const tr = document.createElement('tr');
-    // Gramagem and Crony columns shown empty (to be filled by hand on printed PDF)
-    tr.innerHTML = `<td>${i+1}</td><td>${p.nome}</td><td>${p.equipa}</td><td></td><td></td>`;
+    tr.dataset.docid = p.id || '';
+    tr.innerHTML = `<td>${i+1}</td><td>${escapeHtml(p.nome)}</td><td>${escapeHtml(p.equipa)}</td><td></td><td></td>`;
     tbody.appendChild(tr);
   });
+  countEl.textContent = lista.length;
+  vagasRestEl.textContent = Math.max(0, settings.limit - lista.length);
   atualizarUI();
 }
 
-// init ui values
-document.getElementById('adminDate').value = settings.gameDate;
-document.getElementById('adminLimit').value = settings.limit;
-atualizarTabela();
+// Initialize Firestore DB
+const db = getFirestore(); // the app was initialized in the earlier script tag
 
-// public form submit (only Nome + Equipa)
-form.addEventListener('submit', e => {
+// Handle form submit - write to Firestore
+form.addEventListener('submit', async function(e){
   e.preventDefault();
   const nome = document.getElementById('nome').value.trim();
   const equipa = document.getElementById('equipa').value.trim();
-  if (!nome || !equipa) { status.textContent = '⚠️ Preenche todos os campos!'; return; }
-  if (inscritos.find(p => p.nome.toLowerCase() === nome.toLowerCase())) {
-    status.textContent = '🚫 Já existe uma inscrição com esse nome! Por favor, não te inscrevas novamente.';
-    alert('Este jogador já está inscrito. Não é necessário inscrever novamente.');
+  if (!nome || !equipa) {
+    status.textContent = '⚠️ Preenche todos os campos!';
     return;
   }
-  if (inscritos.length >= settings.limit) { status.textContent = '❌ Limite de vagas atingido!'; return; }
-  inscritos.push({ nome, equipa });
-  localStorage.setItem(INSCRITOS_KEY, JSON.stringify(inscritos));
-  status.textContent = '✅ Inscrição registada! (Recorda: o custo do jogo é 2€, pago no local)';
-  alert('Inscrição concluída! Recorda: o custo do jogo é 2€, pago no local. Não inscrevas o mesmo jogador novamente.');
-  form.reset();
-  atualizarTabela();
+  const inscricao = {
+    nome, equipa,
+    createdAt: new Date().toISOString()
+  };
+  try {
+    await addDoc(collection(db, 'inscritos'), inscricao);
+    status.textContent = '✅ Inscrição registada — obrigado!';
+    form.reset();
+  } catch (err) {
+    console.error('Erro a gravar no Firestore:', err);
+    status.textContent = '❌ Erro ao registar — tenta de novo.';
+  }
 });
 
-// admin login
-function loginAdmin() {
-  const pass = document.getElementById('adminPass').value;
-  if (pass === settings.password) {
-    document.getElementById('adminPanel').style.display = 'block';
-    document.getElementById('adminLogin').style.display = 'none';
-    document.getElementById('adminDate').value = settings.gameDate;
-    document.getElementById('adminLimit').value = settings.limit;
-    atualizarTabela();
-  } else alert('Senha incorreta!');
-}
-
-function salvarConfiguracao() {
-  const newDate = document.getElementById('adminDate').value.trim();
-  const newLimit = parseInt(document.getElementById('adminLimit').value, 10);
-  if (!newDate) return alert('Por favor, define a data do jogo.');
-  if (!newLimit || newLimit < 1) return alert('Define um limite válido (≥1).');
-  settings.gameDate = newDate;
-  settings.limit = newLimit;
-  saveSettings(settings);
-  atualizarTabela();
-  alert('Configuração guardada. A data e o limite foram atualizados.');
-}
-
-// CSV (Nome, Equipa)
-function baixarCSV() {
-  let csv = 'Nome,Equipa\n';
-  inscritos.forEach(p => {
-    const nome = (p.nome||'').replace(/\n/g,' ').replace(/,/g,'');
-    const equipa = (p.equipa||'').replace(/\n/g,' ').replace(/,/g,'');
-    csv += `${nome},${equipa}\n`;
-  });
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'inscritos_tasqueiros_v4.csv';
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-// PDF: A4 vertical, logo + title header on each page, 40 entries per page, Gramagem/Crony columns empty
-function downloadPDF() {
-  const perPage = 40;
-  const pages = Math.ceil(inscritos.length / perPage) || 1;
-  let docHtml = "<!doctype html><html><head><meta charset='utf-8'><title>Lista Inscritos</title><style>@page{size:A4 portrait;margin:15mm}body{font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#000}header{text-align:center;margin-bottom:6px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #444;padding:6px;text-align:left}thead th{background:#eee}h2{text-align:center;margin:6px 0}.small{font-size:11px}</style></head><body>";
-  for (let p=0;p<pages;p++) {
-    const start = p*perPage;
-    const end = Math.min(start+perPage, inscritos.length);
-    // header includes the same image filename (must be in same folder as HTML)
-    docHtml += '<header><img src="254350617_113800464433047_4265703432762912318_n.jpg" style="width:120px;display:block;margin:0 auto 6px"><h2>Inscritos - ' + settings.gameDate + '</h2></header>';
-    docHtml += '<table><thead><tr><th style="width:5%">#</th><th style="width:45%">Nome</th><th style="width:25%">Equipa</th><th style="width:12%">Gramagem</th><th style="width:13%">Crony</th></tr></thead><tbody>';
-    for (let i=start;i<end;i++) {
-      const it = inscritos[i];
-      const idx = i+1;
-      // Gramagem and Crony cells left empty for handwritten filling
-      docHtml += '<tr><td>' + idx + '</td><td>' + (it.nome||'') + '</td><td>' + (it.equipa||'') + '</td><td></td><td></td></tr>';
-    }
-    docHtml += '</tbody></table>';
-    if (p < pages-1) docHtml += "<div style='page-break-after:always'></div>";
+// Admin login (local password) - shows admin panel and attaches realtime listener
+window.loginAdmin = async function() {
+  const pwd = document.getElementById('adminPass').value || '';
+  if (pwd !== settings.password) {
+    alert('Senha inválida');
+    return;
   }
-  docHtml += "</body></html>";
-  const w = window.open('', '_blank');
-  w.document.open();
-  w.document.write(docHtml);
-  w.document.close();
-  // small delay to let the browser render before print dialog
-  setTimeout(()=>{ w.print(); }, 600);
-}
+  document.getElementById('adminLogin').style.display = 'none';
+  document.getElementById('adminPanel').style.display = 'block';
 
-function limparInscricoes() { if (!confirm('Tens a certeza? Isto irá apagar todas as inscrições.')) return; inscritos = []; localStorage.setItem(INSCRITOS_KEY, JSON.stringify(inscritos)); atualizarTabela(); }
+  // attach realtime listener
+  const q = query(collection(db, 'inscritos'), orderBy('createdAt', 'asc'));
+  onSnapshot(q, snap => {
+    const lista = [];
+    snap.forEach(doc => {
+      const data = doc.data();
+      lista.push({ id: doc.id, nome: data.nome, equipa: data.equipa, createdAt: data.createdAt });
+    });
+    atualizarTabela(lista);
+  }, err => {
+    console.error('Erro a escutar inscricoes:', err);
+    alert('Erro ao carregar inscrições. Verifica console.');
+  });
+};
 
-function logoutAdmin() { document.getElementById('adminPanel').style.display = 'none'; document.getElementById('adminLogin').style.display = 'block'; document.getElementById('adminPass').value = ''; }
+// Export CSV (reads current table DOM)
+window.exportCSV = function() {
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+  if (!rows.length) { alert('Sem inscrições para exportar'); return; }
+  const csv = ['#;Nome;Equipa;DataInscricao'];
+  rows.forEach((r,i) => {
+    const cols = Array.from(r.querySelectorAll('td')).map(td => td.textContent.replace(/;/g, ',').trim());
+    csv.push(`${cols[0]};${cols[1]};${cols[2]};${cols[3]}`);
+  });
+  const blob = new Blob([csv.join('\\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'inscricoes_tasqueiros.csv'; a.click(); URL.revokeObjectURL(url);
+};
 
-function mostrarAlterarSenha() { document.getElementById('alterarSenhaDiv').style.display = 'block'; }
+// Export PDF using jsPDF + autoTable (keeps same look/behavior)
+window.exportPDFfromTable = function(){
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+  if(!rows.length){ alert('Sem inscrições para exportar'); return; }
+  const head = [['#','Nome','Equipa','Data inscrição']];
+  const body = rows.map((r,i)=> Array.from(r.querySelectorAll('td')).map(td=>td.textContent));
+  const doc = new window.jspdf.jsPDF({orientation:'portrait'});
+  doc.setFontSize(14);
+  doc.text('Inscrições Tasqueiros', 14, 20);
+  doc.autoTable({ startY: 28, head: head, body: body, styles:{cellPadding:2, fontSize:10} });
+  doc.save('inscricoes_tasqueiros.pdf');
+};
 
-function guardarNovaSenha() { const nova = document.getElementById('novaSenha').value.trim(); if (!nova) return alert('Introduz uma nova senha.'); settings.password = nova; saveSettings(settings); document.getElementById('senhaAtualTxt').textContent = nova; document.getElementById('novaSenha').value = ''; document.getElementById('alterarSenhaDiv').style.display = 'none'; alert('Senha alterada com sucesso!'); }
+// expose old named functions used by original UI if any
+document.getElementById('btnExportCSV')?.addEventListener('click', ()=>{ window.exportCSV(); });
+document.getElementById('btnExportPDF')?.addEventListener('click', ()=>{ window.exportPDFfromTable(); });
 
-atualizarTabela();
+// logout simply hides panel
+document.getElementById('btnLogout')?.addEventListener('click', ()=>{
+  document.getElementById('adminPanel').style.display = 'none';
+  document.getElementById('adminLogin').style.display = 'block';
+});
+
+// settings save
+document.getElementById('btnSaveSettings')?.addEventListener('click', ()=>{
+  settings.gameDate = document.getElementById('adminDate').value || settings.gameDate;
+  settings.limit = Number(document.getElementById('adminLimit').value) || settings.limit;
+  saveSettings(settings);
+  alert('Settings guardadas localmente.');
+  atualizarUI();
+});
+
+// save new password (local)
+document.getElementById('btnSaveSenha')?.addEventListener('click', ()=>{
+  const ns = document.getElementById('novaSenha').value || '';
+  if(ns){ settings.password = ns; saveSettings(settings); document.getElementById('novaSenha').value = ''; alert('Senha atualizada (guardada localmente).'); atualizarUI(); }
+  else alert('Introduz a nova senha.');
+});
+
+// initialize UI values
+document.getElementById('adminDate').value = settings.gameDate;
+document.getElementById('adminLimit').value = settings.limit;
+atualizarTabela([]); // empty initial
+atualizarUI();
+
 </script>
 </body>
 </html>
